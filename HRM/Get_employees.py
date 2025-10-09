@@ -1,3 +1,28 @@
+"""
+Ứng dụng Quản lý Nhân viên HRM
+
+Module này cung cấp một công cụ toàn diện để lấy, hiển thị, tìm kiếm,
+lọc và xuất dữ liệu nhân viên từ HRM Base API.
+
+Tính năng:
+- Giao diện GUI sử dụng CustomTkinter để quản lý nhân viên tương tác
+- Chế độ console để vận hành dòng lệnh
+- Tìm kiếm fuzzy trên nhiều trường
+- Lọc theo cột
+- Xuất dữ liệu sang CSV, Excel và JSON
+- Hỗ trợ biến môi trường để quản lý API key
+
+Phụ thuộc:
+- requests: Để giao tiếp API
+- pandas: Để thao tác dữ liệu
+- customtkinter: Để các thành phần GUI hiện đại
+- thefuzz: Để so khớp chuỗi fuzzy
+- python-dotenv: Để tải biến môi trường
+
+Tác giả: [Tên của bạn]
+Ngày: Tháng 10 năm 2025
+"""
+
 import requests
 import pandas as pd
 import customtkinter as ctk
@@ -9,114 +34,166 @@ import os
 import sys
 from dotenv import load_dotenv
 
+
 class EmployeeApp:
+    """
+    Lớp ứng dụng chính để Quản lý Nhân viên HRM.
+
+    Lớp này bao gồm tất cả chức năng để lấy dữ liệu nhân viên từ API,
+    cung cấp cả giao diện GUI và console để thao tác dữ liệu, và hỗ trợ
+    nhiều định dạng xuất khác nhau.
+
+    Thuộc tính:
+        df (pd.DataFrame): Dữ liệu nhân viên gốc từ API
+        filtered_df (pd.DataFrame): Dữ liệu hiện tại được lọc/hiển thị
+        tree (ttk.Treeview): Widget bảng GUI để hiển thị nhân viên
+        column_filters (dict): Bộ lọc cột đang hoạt động
+        root (ctk.CTk): Cửa sổ GUI chính
+        emp_window (ctk.CTkToplevel): Cửa sổ hiển thị nhân viên
+    """
+
     def __init__(self):
-        self.df = pd.DataFrame()
-        self.filtered_df = pd.DataFrame()
-        self.tree = None
-        self.column_filters = {}
-        self.is_exporting = False
-        self.export_var = None
-        self.filter_pending = None
-        
-        # Load environment variables from HRM/.env
+        """
+        Khởi tạo instance EmployeeApp.
+
+        Thiết lập cấu trúc dữ liệu ban đầu, tải biến môi trường,
+        và chuẩn bị thiết lập GUI.
+        """
+        # Khởi tạo cấu trúc dữ liệu
+        self.df = pd.DataFrame()  # Dữ liệu nhân viên gốc
+        self.filtered_df = pd.DataFrame()  # Dữ liệu đã lọc để hiển thị
+        self.tree = None  # Widget bảng GUI
+        self.column_filters = {}  # Từ điển các bộ lọc cột đang hoạt động
+        self.is_exporting = False  # Cờ để ngăn xuất đồng thời
+        self.export_var = None  # Biến lựa chọn định dạng xuất
+        self.filter_pending = None  # Biến debounce cho các thao tác lọc
+
+        # Tải biến môi trường từ file HRM/.env
         env_path = os.path.join(os.path.dirname(__file__), '.env')
         load_dotenv(env_path)
-        
+
+        # Thiết lập giao diện người dùng đồ họa
         self.setup_gui()
     
     def setup_gui(self):
-        # Cấu hình CustomTkinter
-        ctk.set_appearance_mode("light")
-        ctk.set_default_color_theme("blue")
-        
-        # Tạo cửa sổ chính
+        """
+        Thiết lập giao diện người dùng đồ họa chính.
+
+        Cấu hình giao diện CustomTkinter, tạo cửa sổ chính,
+        và khởi tạo tất cả các thành phần GUI bao gồm nhập API key,
+        nút lấy dữ liệu và hiển thị trạng thái.
+        """
+        # Cấu hình cài đặt giao diện CustomTkinter
+        ctk.set_appearance_mode("light")  # Sử dụng chủ đề sáng
+        ctk.set_default_color_theme("blue")  # Đặt chủ đề màu xanh
+
+        # Tạo cửa sổ ứng dụng chính
         self.root = ctk.CTk()
-        self.root.title("Quản lý nhân viên HRM")
-        self.root.geometry("500x300")
-        self.root.resizable(False, False)
-        
-        # Tạo frame chính
+        self.root.title("Quản lý nhân viên HRM")  # HRM Employee Manager
+        self.root.geometry("500x300")  # Đặt kích thước cửa sổ
+        self.root.resizable(False, False)  # Vô hiệu hóa thay đổi kích thước cửa sổ
+
+        # Tạo khung chính để chứa tất cả các thành phần
         main_frame = ctk.CTkFrame(self.root)
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
-        
-        # Tiêu đề
-        title_label = ctk.CTkLabel(main_frame, text="HRM Employee Manager", 
+
+        # Thêm nhãn tiêu đề
+        title_label = ctk.CTkLabel(main_frame, text="HRM Employee Manager",
                                  font=ctk.CTkFont(size=24, weight="bold"))
         title_label.pack(pady=(20, 30))
-        
-        # Label và Entry cho API key
-        api_label = ctk.CTkLabel(main_frame, text="Nhập API Key:", 
+
+        # Tạo phần nhập API key
+        api_label = ctk.CTkLabel(main_frame, text="Nhập API Key:",
                                font=ctk.CTkFont(size=14))
         api_label.pack(pady=(0, 10))
-        
-        self.api_entry = ctk.CTkEntry(main_frame, placeholder_text="Nhập API key của bạn...", 
-                                    width=300, show="*")
+
+        self.api_entry = ctk.CTkEntry(main_frame, placeholder_text="Nhập API key của bạn...",
+                                    width=300, show="*")  # Che dữ liệu để bảo mật
         self.api_entry.pack(pady=(0, 20))
-        
-        # Load API key from environment if available
+
+        # Tải API key từ môi trường nếu có sẵn
         api_key = os.getenv('API_KEY')
         if api_key:
-            self.api_entry.insert(0, api_key)
-        
-        # Nút lấy dữ liệu
-        self.fetch_btn = ctk.CTkButton(main_frame, text="Lấy danh sách nhân viên", 
-                                     command=self.fetch_employees,
+            self.api_entry.insert(0, api_key)  # Điền sẵn từ biến môi trường
+
+        # Tạo nút lấy dữ liệu
+        self.fetch_btn = ctk.CTkButton(main_frame, text="Lấy danh sách nhân viên",
+                                     command=self.fetch_employees,  # Gắn với phương thức lấy dữ liệu
                                      width=200, height=40)
         self.fetch_btn.pack(pady=(0, 20))
-        
-        # Label trạng thái
-        self.status_label = ctk.CTkLabel(main_frame, text="", 
+
+        # Tạo nhãn trạng thái để phản hồi
+        self.status_label = ctk.CTkLabel(main_frame, text="",
                                        font=ctk.CTkFont(size=12))
         self.status_label.pack(pady=(0, 10))
         
     def fetch_employees(self):
+        """
+        Lấy dữ liệu nhân viên từ HRM API.
+
+        Truy xuất danh sách nhân viên bằng API key được cung cấp, xử lý dữ liệu,
+        và chuẩn bị để hiển thị. Cập nhật UI với trạng thái và xử lý lỗi.
+
+        Raises:
+            Hiển thị messagebox lỗi cho các điều kiện thất bại khác nhau.
+        """
+        # Lấy và xác thực API key
         api_key = self.api_entry.get().strip()
-        
+
         if not api_key:
             messagebox.showerror("Lỗi", "Vui lòng nhập API key!")
             return
-        
+
+        # Cập nhật UI để hiển thị trạng thái đang lấy dữ liệu
         self.status_label.configure(text="Đang lấy dữ liệu...")
-        self.fetch_btn.configure(state="disabled")
-        self.root.update()
-        
+        self.fetch_btn.configure(state="disabled")  # Vô hiệu hóa nút trong khi lấy dữ liệu
+        self.root.update()  # Buộc cập nhật UI
+
         try:
-            # URL API
+            # Xác định điểm cuối API và tham số
             url = "https://hrm.base.vn/extapi/v1/employee/list"
-            
-            # Payload
             payload = {
                 "access_token": api_key,
-                "page": 1,
-                "limit": 50
+                "page": 1,  # Bắt đầu từ trang đầu
+                "limit": 50  # Giới hạn kết quả mỗi trang
             }
-            
-            # Gửi POST request
+
+            # Thực hiện yêu cầu POST tới API
             response = requests.post(url, data=payload)
-            
+
             if response.status_code == 200:
+                # Phân tích cú pháp phản hồi JSON
                 data = response.json()
-                
+
                 if data and 'employees' in data:
                     employees = data['employees']
                     if employees:
-                        # Xử lý dữ liệu
+                        # Xử lý và biến đổi dữ liệu nhân viên
                         self.df = pd.DataFrame(employees)
+
+                        # Trích xuất và định dạng các trường cụ thể
                         self.df['email'] = self.df.apply(lambda x: x.get('email'), axis=1)
                         self.df['phone'] = self.df.apply(lambda x: x.get('phone'), axis=1)
-                        self.df['dob'] = self.df.apply(lambda x: f"{x.get('dob_day')}/{x.get('dob_month')}/{x.get('dob_year')}", axis=1)
+                        self.df['dob'] = self.df.apply(
+                            lambda x: f"{x.get('dob_day')}/{x.get('dob_month')}/{x.get('dob_year')}",
+                            axis=1
+                        )
                         self.df['position'] = self.df.apply(lambda x: x.get('title'), axis=1)
-                        self.df['bank_account'] = self.df.apply(lambda x: x.get('bank', {}).get('number'), axis=1)
-                        self.df['bank_name'] = self.df.apply(lambda x: x.get('bank', {}).get('name'), axis=1)
-                        
-                        # Thêm cột STT
+                        self.df['bank_account'] = self.df.apply(
+                            lambda x: x.get('bank', {}).get('number'), axis=1
+                        )
+                        self.df['bank_name'] = self.df.apply(
+                            lambda x: x.get('bank', {}).get('name'), axis=1
+                        )
+
+                        # Thêm cột số thứ tự (STT - Số thứ tự)
                         self.df.reset_index(drop=True, inplace=True)
                         self.df.insert(0, 'stt', range(1, len(self.df) + 1))
-                        
-                        # Khởi tạo filtered_df
+
+                        # Khởi tạo bản sao dữ liệu đã lọc
                         self.filtered_df = self.df.copy()
-                        
+
+                        # Cập nhật trạng thái và hiển thị cửa sổ nhân viên
                         self.status_label.configure(text=f"Lấy thành công {len(self.df)} nhân viên")
                         self.show_employees_window()
                     else:
@@ -125,89 +202,103 @@ class EmployeeApp:
                     messagebox.showerror("Lỗi", "Không tìm thấy dữ liệu nhân viên!")
             else:
                 messagebox.showerror("Lỗi", f"API trả về lỗi: {response.status_code}")
-                
+
         except requests.exceptions.RequestException as e:
+            # Xử lý lỗi liên quan đến mạng
             messagebox.showerror("Lỗi kết nối", f"Không thể kết nối đến API: {str(e)}")
         except Exception as e:
+            # Xử lý bất kỳ lỗi không mong muốn nào khác
             messagebox.showerror("Lỗi", f"Đã xảy ra lỗi: {str(e)}")
         finally:
+            # Luôn luôn kích hoạt lại nút lấy dữ liệu
             self.fetch_btn.configure(state="normal")
     
     def show_employees_window(self):
-        # Tạo cửa sổ hiển thị danh sách nhân viên
+        """
+        Hiển thị cửa sổ dữ liệu nhân viên với bảng, tìm kiếm và điều khiển lọc.
+
+        Tạo một cửa sổ modal mới chứa:
+        - Bảng dữ liệu nhân viên với sắp xếp và lọc
+        - Thanh tìm kiếm với so khớp fuzzy
+        - Chức năng xuất dữ liệu
+        - Hiển thị thống kê
+        """
+        # Tạo cửa sổ modal để hiển thị nhân viên
         self.emp_window = ctk.CTkToplevel(self.root)
         self.emp_window.title("Danh sách nhân viên - HRM Manager Pro")
         self.emp_window.geometry("1400x800")
-        self.emp_window.grab_set()  # Modal window
+        self.emp_window.grab_set()  # Làm cho cửa sổ modal
         
-        # Frame chính
+        # Khung container chính
         main_frame = ctk.CTkFrame(self.emp_window)
         main_frame.pack(fill="both", expand=True, padx=15, pady=15)
         
-        # Frame header với tiêu đề và thông tin
+        # Phần header với tiêu đề và thông tin
         header_frame = ctk.CTkFrame(main_frame)
         header_frame.pack(fill="x", padx=10, pady=(10, 15))
         
-        # Tiêu đề
+        # Tiêu đề hiển thị số lượng dữ liệu hiện tại
         self.title_label = ctk.CTkLabel(header_frame, text=f"Danh sách nhân viên ({len(self.filtered_df)} / {len(self.df)} người)", 
                                        font=ctk.CTkFont(size=20, weight="bold"))
         self.title_label.pack(pady=15)
         
-        # Frame tìm kiếm và lọc
+        # Phần tìm kiếm và lọc
         search_frame = ctk.CTkFrame(main_frame)
         search_frame.pack(fill="x", padx=10, pady=(0, 15))
         
-        # Thanh tìm kiếm fuzzy
+        # Ô nhập tìm kiếm fuzzy
         search_label = ctk.CTkLabel(search_frame, text="🔍 Tìm kiếm:", font=ctk.CTkFont(size=14))
         search_label.pack(side="left", padx=(15, 10), pady=15)
         
         self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="Nhập tên, email, số điện thoại... (Fuzzy Search)", 
                                         width=300)
         self.search_entry.pack(side="left", padx=(0, 15), pady=15)
-        self.search_entry.bind("<KeyRelease>", self.on_search_change)
+        self.search_entry.bind("<KeyRelease>", self.on_search_change)  # Gắn với trình xử lý tìm kiếm
         
-        # Nút clear search
+        # Nút xóa tìm kiếm
         clear_btn = ctk.CTkButton(search_frame, text="Xóa", command=self.clear_search, width=60)
         clear_btn.pack(side="left", padx=(0, 15), pady=15)
         
-        # Label hướng dẫn
+        # Văn bản hướng dẫn để lọc cột
         help_label = ctk.CTkLabel(search_frame, text="💡 Click vào tiêu đề cột để lọc dữ liệu", 
                                 font=ctk.CTkFont(size=12))
         help_label.pack(side="right", padx=(15, 15), pady=15)
         
-        # Frame cho bảng với filter
+        # Container bảng với panel lọc
         table_container = ctk.CTkFrame(main_frame)
         table_container.pack(fill="both", expand=True, padx=10, pady=(0, 15))
         
-        # Frame cho filter (ẩn/hiện)
+        # Khung lọc ẩn (hiển thị khi nhấp vào tiêu đề cột)
         self.filter_frame = ctk.CTkFrame(table_container)
         self.filter_frame.pack(fill="x", padx=10, pady=(10, 5))
-        self.filter_frame.pack_forget()  # Ẩn ban đầu
+        self.filter_frame.pack_forget()  # Ban đầu ẩn
         
-        # Frame cho bảng
+        # Khung bảng với thanh cuộn
         table_frame = tk.Frame(table_container)
         table_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Scrollbars
+        # Tạo thanh cuộn cho bảng
         v_scrollbar = ttk.Scrollbar(table_frame, orient="vertical")
         h_scrollbar = ttk.Scrollbar(table_frame, orient="horizontal")
         
-        # Treeview với cột STT và tất cả cột từ data
+        # Xác định cột để hiển thị (STT + tất cả cột dữ liệu)
         self.show_cols = ['stt'] + list(self.df.columns)
+
+        # Tạo widget Treeview để hiển thị dữ liệu
         self.tree = ttk.Treeview(table_frame, 
                                columns=self.show_cols, 
-                               show="headings",
+                               show="headings",  # Ẩn cột đầu mặc định
                                yscrollcommand=v_scrollbar.set,
                                xscrollcommand=h_scrollbar.set)
         
-        # Cấu hình scrollbars
+        # Cấu hình thanh cuộn
         v_scrollbar.config(command=self.tree.yview)
         h_scrollbar.config(command=self.tree.xview)
         v_scrollbar.pack(side="right", fill="y")
         h_scrollbar.pack(side="bottom", fill="x")
         self.tree.pack(side="left", fill="both", expand=True)
         
-        # Headers với khả năng lọc - tạo động từ cột data
+        # Ánh xạ tiêu đề cột
         self.headers = {}
         for col in self.show_cols:
             if col == 'stt':
@@ -231,26 +322,26 @@ class EmployeeApp:
             elif col == 'bank_name':
                 self.headers[col] = 'Ngân hàng'
             else:
-                # Tên mặc định cho cột mới
+                # Tiêu đề mặc định cho cột mới
                 self.headers[col] = col.replace('_', ' ').title()
         
-        # Cấu hình cột và bind event cho filter
+        # Cấu hình tiêu đề cột với ràng buộc lọc
         for col in self.show_cols:
             self.tree.heading(col, text=f"{self.headers.get(col, col)} ▼", 
                             command=lambda c=col: self.show_column_filter(c))
-            # Width sẽ được set trong refresh_table
+            # Chiều rộng sẽ được đặt trong refresh_table
         
-        # Tải dữ liệu ban đầu
+        # Tải dữ liệu ban đầu vào bảng
         self.refresh_table()
         
-        # Bind double click để ignore (tránh trigger filter)
+        # Ngăn nhấp đúp kích hoạt lọc
         self.tree.bind("<Double-1>", lambda e: None)
         
-        # Frame cho các nút điều khiển
+        # Khung cho các nút điều khiển
         btn_frame = ctk.CTkFrame(main_frame)
         btn_frame.pack(fill="x", padx=10, pady=(0, 10))
         
-        # Dropdown xuất dữ liệu
+        # Menu thả xuống xuất dữ liệu
         self.export_var = tk.StringVar(value="Chọn định dạng xuất")
         export_options = ["Chọn định dạng xuất", "CSV", "Excel", "JSON"]
         export_menu = ctk.CTkOptionMenu(btn_frame, 
@@ -278,28 +369,32 @@ class EmployeeApp:
         close_btn.pack(side="right", padx=(10, 15), pady=12)
 
     def on_search_change(self, event=None):
-        """Xử lý sự kiện thay đổi trong ô tìm kiếm"""
+        """
+        Xử lý thay đổi đầu vào tìm kiếm với so khớp fuzzy.
+
+        Cập nhật dữ liệu đã lọc dựa trên văn bản tìm kiếm trên nhiều cột
+        bằng cách sử dụng so khớp chuỗi fuzzy với ngưỡng tương đồng 60%.
+        """
         search_text = self.search_entry.get().strip()
         if not search_text or self.df.empty:
             self.filtered_df = self.df.copy()
         else:
-            # Fuzzy search trong các cột quan trọng
+            # Tìm kiếm fuzzy trên các cột chính
             search_columns = ['name', 'email', 'phone', 'code', 'position']
             mask = pd.Series([False] * len(self.df))
-            
+
             for i, (idx, row) in enumerate(self.df.iterrows()):
                 for col in search_columns:
                     if col in self.df.columns and pd.notna(row[col]):
-                        # Sử dụng thefuzz để tìm kiếm fuzzy
-                        from thefuzz import fuzz
+                        # Sử dụng so khớp fuzzy để tìm kiếm linh hoạt
                         similarity = fuzz.partial_ratio(search_text.lower(), str(row[col]).lower())
-                        if similarity >= 60:  # Ngưỡng tương đồng 60%
+                        if similarity >= 60:  # Ngưỡng tương đồng
                             mask.iloc[i] = True
                             break
-            
+
             self.filtered_df = self.df[mask].copy()
-        
-        # Áp dụng lại các filter cột nếu có
+
+        # Áp dụng lại bộ lọc cột và làm mới hiển thị
         self.apply_column_filters()
         self.refresh_table()
     
@@ -370,7 +465,7 @@ class EmployeeApp:
         # Áp dụng column filters
         for column, filter_value in self.column_filters.items():
             if isinstance(filter_value, str) and len(filter_value) > 0 and column in temp_df.columns:
-                # Text filter (partial match)
+                # Bộ lọc văn bản (khớp một phần)
                 mask = temp_df[column].astype(str).str.lower().str.contains(filter_value, na=False, regex=False)
                 temp_df = temp_df[mask]
         
@@ -389,12 +484,12 @@ class EmployeeApp:
             return
         self.filter_pending = None
         
-        # Toggle filter frame visibility
+        # Chuyển đổi hiển thị khung bộ lọc
         if self.filter_frame.winfo_viewable():
             self.filter_frame.pack_forget()
             return
         
-        # Clear existing filters in frame
+        # Xóa các bộ lọc hiện có trong khung
         for widget in self.filter_frame.winfo_children():
             widget.destroy()
         
@@ -447,17 +542,22 @@ class EmployeeApp:
         self.filter_frame.pack_forget()
     
     def refresh_table(self):
-        """Làm mới bảng hiển thị với dữ liệu đã lọc"""
+        """
+        Làm mới hiển thị bảng dữ liệu với dữ liệu đã lọc hiện tại.
+
+        Xóa các hàng bảng hiện có và điền lại với dữ liệu đã lọc,
+        cập nhật tiêu đề cột và nhãn thống kê.
+        """
         if not hasattr(self, 'tree') or self.tree is None or self.filtered_df.empty:
             return
-            
-        # Xóa dữ liệu cũ
+
+        # Xóa dữ liệu bảng hiện có
         for item in self.tree.get_children():
             self.tree.delete(item)
-        
-        # Thêm dữ liệu mới với STT
+
+        # Điền bảng với dữ liệu đã lọc
         for idx, (_, row) in enumerate(self.filtered_df.iterrows(), 1):
-            values = [str(idx)]  # STT
+            values = [str(idx)]  # Số thứ tự (STT)
             for col in self.show_cols[1:]:  # Bỏ qua cột STT
                 if col in self.filtered_df.columns:
                     val = row[col]
@@ -468,18 +568,18 @@ class EmployeeApp:
                 else:
                     values.append("")
             self.tree.insert("", "end", values=values)
-        
-        # Cập nhật labels
+
+        # Cập nhật nhãn hiển thị với số lượng hiện tại
         if hasattr(self, 'title_label'):
             total = len(self.df)
             filtered = len(self.filtered_df)
             self.title_label.configure(text=f"Danh sách nhân viên ({filtered} / {total} người)")
-        
+
         if hasattr(self, 'stats_label'):
             filtered = len(self.filtered_df)
             self.stats_label.configure(text=f"Hiển thị: {filtered} nhân viên")
-        
-        # Auto-resize columns based on content
+
+        # Tự động điều chỉnh kích thước cột dựa trên nội dung
         self.auto_resize_columns()
     
     def auto_resize_columns(self):
@@ -487,7 +587,7 @@ class EmployeeApp:
         if not hasattr(self, 'tree') or self.tree is None or self.filtered_df.empty:
             return
         
-        # Font metrics để tính width (approx 8 pixels per char)
+        # Thuộc tính font để tính chiều rộng (khoảng 8 pixel mỗi ký tự)
         char_width = 8
         min_width = 60
         max_width = 400
@@ -524,12 +624,12 @@ class EmployeeApp:
     
     def refresh_all(self):
         """Làm mới toàn bộ dữ liệu"""
-        # Reset filters
+        # Đặt lại bộ lọc
         self.column_filters = {}
         if hasattr(self, 'search_entry'):
             self.search_entry.delete(0, 'end')
         
-        # Reload data
+        # Tải lại dữ liệu
         self.filtered_df = self.df.copy()
         self.refresh_table()
         
@@ -592,10 +692,15 @@ class EmployeeApp:
                 messagebox.showerror("Lỗi", f"Không thể xuất file JSON: {str(e)}")
     
     def handle_export(self, selected_format):
-        """Xử lý lựa chọn xuất dữ liệu từ dropdown"""
+        """
+        Xử lý lựa chọn định dạng xuất từ menu thả xuống.
+
+        Ngăn xuất đồng thời và ủy quyền cho phương thức xuất thích hợp
+        dựa trên định dạng đã chọn (CSV, Excel, JSON).
+        """
         if self.is_exporting or selected_format == "Chọn định dạng xuất":
             return
-        
+
         self.is_exporting = True
         try:
             if selected_format == "CSV":
@@ -610,18 +715,19 @@ class EmployeeApp:
                 self.export_var.set("Chọn định dạng xuất")
     
     def run(self):
+        """Khởi động vòng lặp chính của ứng dụng GUI."""
         self.root.mainloop()
     
     def console_run(self):
-        """Run the application in console mode with full GUI functionality"""
+        """Chạy ứng dụng ở chế độ console với đầy đủ chức năng GUI"""
         print("HRM Employee Manager - Console Mode")
         print("=" * 50)
         
-        # Load environment variables from HRM/.env
+        # Tải biến môi trường từ file HRM/.env
         env_path = os.path.join(os.path.dirname(__file__), '.env')
         load_dotenv(env_path)
         
-        # Get API key from user or environment
+        # Lấy API key từ người dùng hoặc môi trường
         api_key = input("Enter your API key (press Enter to use from .env): ").strip()
         
         if not api_key:
@@ -645,7 +751,7 @@ class EmployeeApp:
                 "limit": 50
             }
             
-            # Send POST request
+            # Gửi yêu cầu POST
             response = requests.post(url, data=payload)
             
             if response.status_code == 200:
@@ -654,7 +760,7 @@ class EmployeeApp:
                 if data and 'employees' in data:
                     employees = data['employees']
                     if employees:
-                        # Process data
+                        # Xử lý dữ liệu
                         self.df = pd.DataFrame(employees)
                         self.df['email'] = self.df.apply(lambda x: x.get('email'), axis=1)
                         self.df['phone'] = self.df.apply(lambda x: x.get('phone'), axis=1)
@@ -663,18 +769,18 @@ class EmployeeApp:
                         self.df['bank_account'] = self.df.apply(lambda x: x.get('bank', {}).get('number'), axis=1)
                         self.df['bank_name'] = self.df.apply(lambda x: x.get('bank', {}).get('name'), axis=1)
                         
-                        # Add STT column
+                        # Thêm cột STT
                         self.df.reset_index(drop=True, inplace=True)
                         self.df.insert(0, 'stt', range(1, len(self.df) + 1))
                         
-                        # Initialize filtered data
+                        # Khởi tạo dữ liệu đã lọc
                         self.filtered_df = self.df.copy()
                         self.column_filters = {}
                         self.search_text = ""
                         
                         print(f"Successfully fetched {len(self.df)} employees.")
                         
-                        # Main menu loop
+                        # Vòng lặp menu chính
                         self.console_main_menu()
                     else:
                         print("Warning: Employee list is empty!")
@@ -686,10 +792,10 @@ class EmployeeApp:
         except requests.exceptions.RequestException as e:
             print(f"Connection error: {str(e)}")
         except Exception as e:
-            print(f"An error occurred: {str(e)}")
+            print(f"Đã xảy ra lỗi: {str(e)}")
     
     def console_main_menu(self):
-        """Main menu for console interface"""
+        """Menu chính cho giao diện console"""
         while True:
             print("\n" + "=" * 50)
             print("HRM EMPLOYEE MANAGER - CONSOLE MENU")
@@ -729,7 +835,7 @@ class EmployeeApp:
                 print("Invalid choice. Please try again.")
     
     def console_search(self):
-        """Console search functionality"""
+        """Chức năng tìm kiếm console"""
         print("\n🔍 FUZZY SEARCH")
         print("-" * 30)
         current_search = self.search_text if hasattr(self, 'search_text') and self.search_text else ""
@@ -747,11 +853,11 @@ class EmployeeApp:
             print("✅ Search cleared")
     
     def console_filter(self):
-        """Console filter functionality"""
+        """Chức năng lọc console"""
         print("\n🔽 COLUMN FILTER")
         print("-" * 30)
         
-        # Show current filters
+        # Hiển thị bộ lọc hiện tại
         if self.column_filters:
             print("Current filters:")
             for col, val in self.column_filters.items():
@@ -788,7 +894,7 @@ class EmployeeApp:
             col, name = columns[choice]
             print(f"\nFiltering by: {name}")
             
-            # Get unique values for this column
+            # Lấy các giá trị duy nhất cho cột này
             if col in self.df.columns:
                 unique_values = self.df[col].dropna().unique()
                 unique_values = sorted([str(v) for v in unique_values if v])
@@ -822,7 +928,7 @@ class EmployeeApp:
                     print(f"✅ Filter for {name} cleared")
     
     def console_sort(self):
-        """Console sort functionality"""
+        """Chức năng sắp xếp console"""
         print("\n📊 SORT BY COLUMN")
         print("-" * 30)
         
@@ -864,7 +970,7 @@ class EmployeeApp:
                 print("Invalid choice")
     
     def console_display(self):
-        """Console display functionality with pagination"""
+        """Chức năng hiển thị console với phân trang"""
         print("\n📋 DISPLAY EMPLOYEES")
         print("-" * 30)
         
@@ -872,7 +978,7 @@ class EmployeeApp:
             print("No employees to display")
             return
         
-        # Display options
+        # Tùy chọn hiển thị
         print("Display options:")
         print("1. Show all employees")
         print("2. Show with pagination (10 per page)")
@@ -906,14 +1012,14 @@ class EmployeeApp:
             except:
                 print("Invalid selection, using default columns")
         
-        # Display data
+        # Hiển thị dữ liệu
         if choice == '1':
-            # Show all with better formatting
+            # Hiển thị tất cả với định dạng tốt hơn
             print(f"\nShowing all {len(self.filtered_df)} employees:")
-            # Limit column width for better display
+            # Giới hạn chiều rộng cột để hiển thị tốt hơn
             display_df = self.filtered_df[display_cols].copy()
             
-            # Truncate long columns
+            # Cắt ngắn các cột dài
             for col in display_cols:
                 if col in ['name', 'email', 'position']:
                     display_df[col] = display_df[col].astype(str).str.slice(0, 30)
@@ -921,7 +1027,7 @@ class EmployeeApp:
             print(display_df.to_string(index=False, max_colwidth=30))
             
         elif choice == '2':
-            # Pagination with better formatting
+            # Phân trang với định dạng tốt hơn
             page_size = 10
             total_pages = (len(self.filtered_df) + page_size - 1) // page_size
             
@@ -933,7 +1039,7 @@ class EmployeeApp:
                 
                 print(f"\nPage {current_page}/{total_pages} (showing {start_idx+1}-{end_idx} of {len(self.filtered_df)})")
                 
-                # Format display
+                # Định dạng hiển thị
                 page_df = self.filtered_df[display_cols].iloc[start_idx:end_idx].copy()
                 for col in display_cols:
                     if col in ['name', 'email', 'position']:
@@ -969,7 +1075,7 @@ class EmployeeApp:
                         print("Invalid input")
     
     def console_statistics(self):
-        """Console statistics functionality"""
+        """Chức năng thống kê console"""
         print("\n📈 STATISTICS")
         print("-" * 30)
         
@@ -980,15 +1086,15 @@ class EmployeeApp:
         print(f"Total employees: {len(self.filtered_df)}")
         print(f"Original dataset: {len(self.df)}")
         
-        # Gender distribution (assuming gender can be inferred from name or other fields)
-        # Since we don't have explicit gender field, let's count by position
+        # Phân bố giới tính (giả định có thể suy ra từ tên hoặc các trường khác)
+        # Vì chúng ta không có trường giới tính rõ ràng, hãy đếm theo vị trí
         if 'position' in self.filtered_df.columns:
             position_counts = self.filtered_df['position'].value_counts()
             print(f"\n📊 Employees by position:")
             for pos, count in position_counts.head(10).items():
                 print(f"  {pos}: {count}")
         
-        # Email domains
+        # Tên miền email
         if 'email' in self.filtered_df.columns:
             email_domains = self.filtered_df['email'].dropna().apply(lambda x: str(x).split('@')[-1] if '@' in str(x) else 'unknown')
             domain_counts = email_domains.value_counts()
@@ -996,7 +1102,7 @@ class EmployeeApp:
             for domain, count in domain_counts.head(5).items():
                 print(f"  {domain}: {count}")
         
-        # Bank distribution
+        # Phân bố ngân hàng
         if 'bank_name' in self.filtered_df.columns:
             bank_counts = self.filtered_df['bank_name'].value_counts()
             print(f"\n🏦 Bank distribution:")
@@ -1005,7 +1111,7 @@ class EmployeeApp:
                     print(f"  {bank}: {count}")
     
     def console_export(self):
-        """Console export functionality"""
+        """Chức năng xuất console"""
         print("\n📄 EXPORT DATA")
         print("-" * 30)
         
@@ -1056,21 +1162,21 @@ class EmployeeApp:
                 print(f"❌ Export failed: {str(e)}")
     
     def console_reset(self):
-        """Reset all filters and search"""
+        """Đặt lại tất cả bộ lọc và tìm kiếm"""
         self.search_text = ""
         self.column_filters = {}
         self.filtered_df = self.df.copy()
         print("✅ All filters and search cleared")
     
     def apply_console_filters(self):
-        """Apply search and column filters to filtered_df"""
+        """Áp dụng bộ lọc tìm kiếm và cột cho filtered_df"""
         if self.df.empty:
             self.filtered_df = pd.DataFrame()
             return
         
         temp_df = self.df.copy()
         
-        # Apply search filter
+        # Áp dụng bộ lọc tìm kiếm
         search_text = getattr(self, 'search_text', '')
         if search_text:
             search_columns = ['name', 'email', 'phone', 'code', 'position']
@@ -1088,7 +1194,7 @@ class EmployeeApp:
             
             temp_df = temp_df[mask]
         
-        # Apply column filters
+        # Áp dụng bộ lọc cột
         for column, filter_value in self.column_filters.items():
             if filter_value and column in temp_df.columns:
                 mask = temp_df[column].astype(str).str.lower().str.contains(filter_value, na=False, regex=False)
@@ -1096,8 +1202,11 @@ class EmployeeApp:
         
         self.filtered_df = temp_df
 
-# Chạy ứng dụng
+# Điểm nhập chính của ứng dụng
 if __name__ == "__main__":
+    # Tạo và chạy ứng dụng quản lý nhân viên
     app = EmployeeApp()
+    # Kiểm tra xem GUI có khả dụng không (có cửa sổ root)
     if hasattr(app, 'root'):
-        app.run()
+        app.run()  # Khởi động chế độ GUI
+    # Nếu không có GUI, phương thức console_run sẽ được gọi riêng biệt
