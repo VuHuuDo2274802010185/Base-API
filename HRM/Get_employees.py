@@ -68,9 +68,9 @@ class EmployeeApp:
         self.export_var = None  # Biến lựa chọn định dạng xuất
         self.filter_pending = None  # Biến debounce cho các thao tác lọc
 
-        # Tải biến môi trường từ file HRM/.env
-        env_path = os.path.join(os.path.dirname(__file__), '.env')
-        load_dotenv(env_path)
+        # Thiết lập đường dẫn .env thành thuộc tính instance (sửa lỗi thiếu self.env_path)
+        self.env_path = os.path.join(os.path.dirname(__file__), '.env')
+        load_dotenv(self.env_path)
 
         # Thiết lập giao diện người dùng đồ họa
         self.setup_gui()
@@ -130,8 +130,10 @@ class EmployeeApp:
     def save_api_key(self, api_key: str):
         """Tạo hoặc cập nhật .env với API_KEY (chỉ khi thiếu hoặc khác)"""
         try:
+            # Đảm bảo đã có self.env_path (phòng khi gọi sớm)
+            if not hasattr(self, 'env_path'):
+                self.env_path = os.path.join(os.path.dirname(__file__), '.env')
             current = os.getenv('API_KEY')
-            # Nếu chưa có file hoặc chưa có key hoặc key khác -> ghi
             if (not os.path.exists(self.env_path)) or (not current) or (current != api_key):
                 lines = []
                 if os.path.exists(self.env_path):
@@ -142,6 +144,8 @@ class EmployeeApp:
                 lines.append(f"API_KEY={api_key}\n")
                 with open(self.env_path, 'w', encoding='utf-8') as f:
                     f.writelines(lines)
+                # Cập nhật ngay biến môi trường trong tiến trình hiện tại
+                os.environ['API_KEY'] = api_key
         except Exception as e:
             if hasattr(self, 'root'):
                 messagebox.showwarning("Cảnh báo", f"Không thể ghi .env: {e}")
@@ -1077,43 +1081,40 @@ class EmployeeApp:
                 print("g. Go to page")
                 print("q. Quit display")
                 
+                nav_choice = input("Choose (n/p/g/q): ")
+
+                if nav_choice == 'q':
+                    break
+                elif nav_choice == 'n' and current_page < total_pages:
+                    current_page += 1
+                elif nav_choice == 'p' and current_page > 1:
+                    current_page -= 1
+                elif nav_choice == 'g':
+                    try:
+                        page_num = int(input("Enter page number: ").strip())
+                        if 1 <= page_num <= total_pages:
+                            current_page = page_num
+                        else:
+                            print("Invalid page number")
+                    except:
+                        print("Invalid input")
+                
+                start_idx = (current_page - 1) * page_size
+                end_idx = min(start_idx + page_size, len(self.filtered_df))
+                print(f"\nPage {current_page}/{total_pages} (showing {start_idx+1}-{end_idx} of {len(self.filtered_df)})")
+                page_df = self.filtered_df[display_cols].iloc[start_idx:end_idx].copy()
+                for col in display_cols:
+                    if col in ['name', 'email', 'position']:
+                        page_df[col] = page_df[col].astype(str).str.slice(0, 30)
+                print(page_df.to_string(index=False, max_colwidth=30))
+                if total_pages == 1:
+                    break
+                print("\nNavigation:")
+                print("n. Next page")
+                print("p. Previous page")
+                print("g. Go to page")
+                print("q. Quit display")
                 nav_choice = input("Choose (n/p/g/q): ").strip().lower()
-                while True:
-                    if nav_choice == 'q':
-                        break
-                    elif nav_choice == 'n' and current_page < total_pages:
-                        current_page += 1
-                    elif nav_choice == 'p' and current_page > 1:
-                        current_page -= 1
-                    elif nav_choice == 'g':
-                        try:
-                            page_num = int(input("Enter page number: ").strip())
-                            if 1 <= page_num <= total_pages:
-                                current_page = page_num
-                            else:
-                                print("Invalid page number")
-                        except:
-                            print("Invalid input")
-                    else:
-                        print("Invalid choice")
-                    if nav_choice == 'q':
-                        break
-                    start_idx = (current_page - 1) * page_size
-                    end_idx = min(start_idx + page_size, len(self.filtered_df))
-                    print(f"\nPage {current_page}/{total_pages} (showing {start_idx+1}-{end_idx} of {len(self.filtered_df)})")
-                    page_df = self.filtered_df[display_cols].iloc[start_idx:end_idx].copy()
-                    for col in display_cols:
-                        if col in ['name', 'email', 'position']:
-                            page_df[col] = page_df[col].astype(str).str.slice(0, 30)
-                    print(page_df.to_string(index=False, max_colwidth=30))
-                    if total_pages == 1:
-                        break
-                    print("\nNavigation:")
-                    print("n. Next page")
-                    print("p. Previous page")
-                    print("g. Go to page")
-                    print("q. Quit display")
-                    nav_choice = input("Choose (n/p/g/q): ").strip().lower()
     
     def console_statistics(self):
         """Chức năng thống kê console"""
