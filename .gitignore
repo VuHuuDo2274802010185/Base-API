@@ -1,6 +1,5 @@
 /.venv
 /Account
 /Base API.docx
-HRM/employees.csv
 HRM/.env
-
+__pycache__

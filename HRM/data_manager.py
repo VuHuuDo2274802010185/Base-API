@@ -8,8 +8,8 @@ import requests
 import pandas as pd
 import os
 from dotenv import load_dotenv
-from .config import API_URL, API_PAGE, API_LIMIT
-from .utils import process_employee_data
+from config import API_URL, API_PAGE, API_LIMIT
+from utils import process_employee_data
 
 
 class DataManager:
@@ -59,7 +59,7 @@ class DataManager:
 
     def apply_filters(self):
         """Áp dụng tất cả bộ lọc"""
-        from .utils import fuzzy_search_dataframe, apply_column_filters
+        from utils import fuzzy_search_dataframe, apply_column_filters
 
         if self.df.empty:
             self.filtered_df = pd.DataFrame()

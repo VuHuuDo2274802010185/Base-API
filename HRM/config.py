@@ -13,7 +13,6 @@ API_LIMIT = 50
 
 # Ánh xạ tiêu đề cột
 HEADERS = {
-    'stt': 'STT',
     'id': 'ID',
     'code': 'Mã NV',
     'name': 'Họ tên',
