@@ -7,9 +7,9 @@ Chứa các chức năng chế độ dòng lệnh.
 import os
 import sys
 from dotenv import load_dotenv
-from .data_manager import DataManager
-from .utils import format_display_value
-from .config import CONSOLE_MENU_OPTIONS
+from data_manager import DataManager
+from utils import format_display_value
+from config import CONSOLE_MENU_OPTIONS
 
 
 class ConsoleApp:

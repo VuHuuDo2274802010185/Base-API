@@ -9,9 +9,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import time
 import os
-from .config import GUI_TITLE, GUI_GEOMETRY, GUI_APPEARANCE, GUI_THEME, HEADERS, TABLE_WIDTH, TABLE_HEIGHT
-from .data_manager import DataManager
-from .utils import format_display_value, get_unique_values
+from config import GUI_TITLE, GUI_GEOMETRY, GUI_APPEARANCE, GUI_THEME, HEADERS, TABLE_WIDTH, TABLE_HEIGHT
+from data_manager import DataManager
+from utils import format_display_value, get_unique_values
 
 
 class GUIApp:
@@ -137,7 +137,8 @@ class GUIApp:
         v_scrollbar = ttk.Scrollbar(table_frame, orient="vertical")
         h_scrollbar = ttk.Scrollbar(table_frame, orient="horizontal")
 
-        self.show_cols = ['stt'] + list(self.data_manager.df.columns)
+        # Xác định cột để hiển thị
+        self.show_cols = list(self.data_manager.df.columns)
 
         self.tree = ttk.Treeview(table_frame,
                                columns=self.show_cols,
@@ -164,9 +165,7 @@ class GUIApp:
 
         # Đặt chiều rộng cố định cho các cột
         for col in self.show_cols:
-            if col == 'stt':
-                self.tree.column(col, width=60, minwidth=50, anchor="center")
-            elif col in ['id', 'code']:
+            if col in ['id', 'code']:
                 self.tree.column(col, width=80, minwidth=60, anchor="center")
             elif col in ['name', 'email', 'position']:
                 self.tree.column(col, width=150, minwidth=100, anchor="w")
@@ -244,7 +243,7 @@ class GUIApp:
         self.filter_frame.pack(fill="x", padx=10, pady=(10, 5))
 
         if column == 'stt':
-            return
+            return  # Không filter cho cột STT
 
         filter_label = ctk.CTkLabel(self.filter_frame, text=f"Lọc cột '{self.headers[column]}':")
         filter_label.pack(side="left", padx=(15, 10), pady=10)
@@ -323,8 +322,8 @@ class GUIApp:
 
         insert_start = time.time()
         for idx, (_, row) in enumerate(self.data_manager.filtered_df.iterrows(), 1):
-            values = [str(idx)]
-            for col in self.show_cols[1:]:
+            values = []
+            for col in self.show_cols:
                 if col in self.data_manager.filtered_df.columns:
                     val = row[col]
                     formatted_val = format_display_value(val, col)

@@ -4,8 +4,8 @@
 Khởi động ứng dụng ở chế độ GUI hoặc console tùy thuộc vào môi trường.
 """
 
-from .gui_app import GUIApp
-from .console_app import ConsoleApp
+from gui_app import GUIApp
+from console_app import ConsoleApp
 
 
 def main():
