@@ -19,8 +19,6 @@ Phụ thuộc:
 - thefuzz: Để so khớp chuỗi fuzzy
 - python-dotenv: Để tải biến môi trường
 
-Tác giả: [Tên của bạn]
-Ngày: Tháng 10 năm 2025
 """
 
 import requests
@@ -33,6 +31,7 @@ import re
 import os
 import sys
 from dotenv import load_dotenv
+import time
 
 
 class EmployeeApp:
@@ -186,10 +185,6 @@ class EmployeeApp:
                             lambda x: x.get('bank', {}).get('name'), axis=1
                         )
 
-                        # Thêm cột số thứ tự (STT - Số thứ tự)
-                        self.df.reset_index(drop=True, inplace=True)
-                        self.df.insert(0, 'stt', range(1, len(self.df) + 1))
-
                         # Khởi tạo bản sao dữ liệu đã lọc
                         self.filtered_df = self.df.copy()
 
@@ -321,6 +316,12 @@ class EmployeeApp:
                 self.headers[col] = 'Số TK'
             elif col == 'bank_name':
                 self.headers[col] = 'Ngân hàng'
+            elif col == 'profile':
+                self.headers[col] = 'Thông tin cá nhân'
+            elif col == 'bank':
+                self.headers[col] = 'Chi tiết ngân hàng'
+            elif col == 'form':
+                self.headers[col] = 'Biểu mẫu'
             else:
                 # Tiêu đề mặc định cho cột mới
                 self.headers[col] = col.replace('_', ' ').title()
@@ -329,7 +330,19 @@ class EmployeeApp:
         for col in self.show_cols:
             self.tree.heading(col, text=f"{self.headers.get(col, col)} ▼", 
                             command=lambda c=col: self.show_column_filter(c))
-            # Chiều rộng sẽ được đặt trong refresh_table
+        
+        # Đặt chiều rộng cố định cho các cột để tránh co lại
+        for col in self.show_cols:
+            if col == 'stt':
+                self.tree.column(col, width=60, minwidth=50, anchor="center")
+            elif col in ['id', 'code']:
+                self.tree.column(col, width=80, minwidth=60, anchor="center")
+            elif col in ['name', 'email', 'position']:
+                self.tree.column(col, width=240, minwidth=150, anchor="w")
+            elif col in ['profile', 'bank', 'form']:
+                self.tree.column(col, width=240, minwidth=200, anchor="w")
+            else:
+                self.tree.column(col, width=200, minwidth=100, anchor="center")
         
         # Tải dữ liệu ban đầu vào bảng
         self.refresh_table()
@@ -375,6 +388,7 @@ class EmployeeApp:
         Cập nhật dữ liệu đã lọc dựa trên văn bản tìm kiếm trên nhiều cột
         bằng cách sử dụng so khớp chuỗi fuzzy với ngưỡng tương đồng 60%.
         """
+        start_time = time.time()
         search_text = self.search_entry.get().strip()
         if not search_text or self.df.empty:
             self.filtered_df = self.df.copy()
@@ -397,6 +411,8 @@ class EmployeeApp:
         # Áp dụng lại bộ lọc cột và làm mới hiển thị
         self.apply_column_filters()
         self.refresh_table()
+        total_time = time.time() - start_time
+        print(f"Search change time: {total_time:.4f}s")
     
     def clear_search(self):
         """Xóa nội dung tìm kiếm"""
@@ -505,7 +521,7 @@ class EmployeeApp:
         # Lấy các giá trị unique cho cột
         if self.df.empty or column not in self.df.columns:
             return
-        unique_values = self.df[column].dropna().unique()
+        unique_values = pd.Series([str(v) for v in self.df[column].dropna()]).unique()
         unique_values = sorted([str(v) for v in unique_values])
         
         # Combobox cho filter
@@ -538,8 +554,52 @@ class EmployeeApp:
         reset_filter_btn.pack(side="right", padx=(0, 10), pady=10)
     
     def close_filter(self):
-        """Đóng panel filter"""
-        self.filter_frame.pack_forget()
+        """Ẩn khung bộ lọc cột"""
+        if hasattr(self, 'filter_frame'):
+            self.filter_frame.pack_forget()
+
+    def format_display_value(self, val, col):
+        """Format giá trị để hiển thị dễ đọc hơn"""
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return ""
+        
+        if isinstance(val, dict):
+            if col == 'profile':
+                # Hiển thị các trường chính của profile
+                address = val.get('address', '')
+                marital = val.get('marital', '')
+                pob = val.get('pob', '')
+                nationality = val.get('nationality', '')
+                return f"Address: {address}, Marital: {marital}, POB: {pob}, Nationality: {nationality}"
+            elif col == 'bank':
+                # Hiển thị thông tin ngân hàng
+                number = val.get('number', '')
+                name = val.get('name', '')
+                return f"Number: {number}, Name: {name}"
+            elif col == 'form':
+                # Hiển thị các trường có giá trị của form
+                items = [f"{k}: {v}" for k, v in val.items() if v not in [None, '', ' ']]
+                return ', '.join(items)
+            else:
+                # Dict khác, hiển thị dạng key: value
+                items = [f"{k}: {v}" for k, v in val.items() if v not in [None, '', ' ']]
+                return ', '.join(items)
+        elif isinstance(val, list):
+            if col == 'form':
+                # Form là list của dicts, hiển thị name: value
+                items = []
+                for item in val:
+                    if isinstance(item, dict):
+                        name = item.get('name', '')
+                        display_val = item.get('display', item.get('value', ''))
+                        if name and display_val:
+                            items.append(f"{name}: {display_val}")
+                return ', '.join(items)
+            else:
+                # List khác, hiển thị dạng string
+                return str(val)
+        else:
+            return str(val)
     
     def refresh_table(self):
         """
@@ -548,26 +608,31 @@ class EmployeeApp:
         Xóa các hàng bảng hiện có và điền lại với dữ liệu đã lọc,
         cập nhật tiêu đề cột và nhãn thống kê.
         """
+        start_time = time.time()
         if not hasattr(self, 'tree') or self.tree is None or self.filtered_df.empty:
             return
 
         # Xóa dữ liệu bảng hiện có
+        delete_start = time.time()
         for item in self.tree.get_children():
             self.tree.delete(item)
+        delete_time = time.time() - delete_start
+        print(f"Delete time: {delete_time:.4f}s")
 
         # Điền bảng với dữ liệu đã lọc
+        insert_start = time.time()
         for idx, (_, row) in enumerate(self.filtered_df.iterrows(), 1):
             values = [str(idx)]  # Số thứ tự (STT)
             for col in self.show_cols[1:]:  # Bỏ qua cột STT
                 if col in self.filtered_df.columns:
                     val = row[col]
-                    if val is None or (isinstance(val, float) and pd.isna(val)):
-                        values.append("")
-                    else:
-                        values.append(str(val))
+                    formatted_val = self.format_display_value(val, col)
+                    values.append(formatted_val)
                 else:
                     values.append("")
             self.tree.insert("", "end", values=values)
+        insert_time = time.time() - insert_start
+        print(f"Insert time: {insert_time:.4f}s")
 
         # Cập nhật nhãn hiển thị với số lượng hiện tại
         if hasattr(self, 'title_label'):
@@ -581,9 +646,13 @@ class EmployeeApp:
 
         # Tự động điều chỉnh kích thước cột dựa trên nội dung
         self.auto_resize_columns()
+        
+        total_time = time.time() - start_time
+        print(f"Total refresh time: {total_time:.4f}s")
     
     def auto_resize_columns(self):
         """Tự động điều chỉnh chiều rộng cột dựa trên nội dung"""
+        start_time = time.time()
         if not hasattr(self, 'tree') or self.tree is None or self.filtered_df.empty:
             return
         
@@ -621,6 +690,9 @@ class EmployeeApp:
                 anchor = "center"
             
             self.tree.column(col, width=final_width, anchor=anchor)
+        
+        total_time = time.time() - start_time
+        print(f"Auto resize time: {total_time:.4f}s")
     
     def refresh_all(self):
         """Làm mới toàn bộ dữ liệu"""
@@ -896,7 +968,7 @@ class EmployeeApp:
             
             # Lấy các giá trị duy nhất cho cột này
             if col in self.df.columns:
-                unique_values = self.df[col].dropna().unique()
+                unique_values = pd.Series([str(v) for v in self.df[col].dropna()]).unique()
                 unique_values = sorted([str(v) for v in unique_values if v])
                 
                 if len(unique_values) <= 10:
@@ -1023,6 +1095,9 @@ class EmployeeApp:
             for col in display_cols:
                 if col in ['name', 'email', 'position']:
                     display_df[col] = display_df[col].astype(str).str.slice(0, 30)
+                else:
+                    # Áp dụng format cho các cột khác
+                    display_df[col] = display_df[col].apply(lambda x: self.format_display_value(x, col)).str.slice(0, 30)
             
             print(display_df.to_string(index=False, max_colwidth=30))
             
@@ -1044,6 +1119,9 @@ class EmployeeApp:
                 for col in display_cols:
                     if col in ['name', 'email', 'position']:
                         page_df[col] = page_df[col].astype(str).str.slice(0, 30)
+                    else:
+                        # Áp dụng format cho các cột khác
+                        page_df[col] = page_df[col].apply(lambda x: self.format_display_value(x, col)).str.slice(0, 30)
                 
                 print(page_df.to_string(index=False, max_colwidth=30))
                 
