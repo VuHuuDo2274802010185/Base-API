@@ -15,6 +15,9 @@ class EmployeeApp:
         self.filtered_df = pd.DataFrame()
         self.tree = None
         self.column_filters = {}
+        self.is_exporting = False
+        self.export_var = None
+        self.filter_pending = None
         
         # Load environment variables from HRM/.env
         env_path = os.path.join(os.path.dirname(__file__), '.env')
@@ -189,8 +192,8 @@ class EmployeeApp:
         v_scrollbar = ttk.Scrollbar(table_frame, orient="vertical")
         h_scrollbar = ttk.Scrollbar(table_frame, orient="horizontal")
         
-        # Treeview với cột STT đầu tiên
-        self.show_cols = ['stt', 'id','code','name','email','phone','dob','position','bank_account','bank_name']
+        # Treeview với cột STT và tất cả cột từ data
+        self.show_cols = ['stt'] + list(self.df.columns)
         self.tree = ttk.Treeview(table_frame, 
                                columns=self.show_cols, 
                                show="headings",
@@ -204,51 +207,58 @@ class EmployeeApp:
         h_scrollbar.pack(side="bottom", fill="x")
         self.tree.pack(side="left", fill="both", expand=True)
         
-        # Headers với khả năng lọc
-        self.headers = {
-            'stt': 'STT',
-            'id': 'ID',
-            'code': 'Mã NV',
-            'name': 'Họ tên',
-            'email': 'Email', 
-            'phone': 'Số điện thoại',
-            'dob': 'Ngày sinh',
-            'position': 'Chức vụ',
-            'bank_account': 'Số TK',
-            'bank_name': 'Ngân hàng'
-        }
+        # Headers với khả năng lọc - tạo động từ cột data
+        self.headers = {}
+        for col in self.show_cols:
+            if col == 'stt':
+                self.headers[col] = 'STT'
+            elif col == 'id':
+                self.headers[col] = 'ID'
+            elif col == 'code':
+                self.headers[col] = 'Mã NV'
+            elif col == 'name':
+                self.headers[col] = 'Họ tên'
+            elif col == 'email':
+                self.headers[col] = 'Email'
+            elif col == 'phone':
+                self.headers[col] = 'Số điện thoại'
+            elif col == 'dob':
+                self.headers[col] = 'Ngày sinh'
+            elif col == 'position':
+                self.headers[col] = 'Chức vụ'
+            elif col == 'bank_account':
+                self.headers[col] = 'Số TK'
+            elif col == 'bank_name':
+                self.headers[col] = 'Ngân hàng'
+            else:
+                # Tên mặc định cho cột mới
+                self.headers[col] = col.replace('_', ' ').title()
         
         # Cấu hình cột và bind event cho filter
         for col in self.show_cols:
             self.tree.heading(col, text=f"{self.headers.get(col, col)} ▼", 
                             command=lambda c=col: self.show_column_filter(c))
-            if col == 'stt':
-                self.tree.column(col, width=60, anchor="center")
-            elif col in ['id', 'code']:
-                self.tree.column(col, width=80, anchor="center")
-            elif col in ['name', 'email']:
-                self.tree.column(col, width=150, anchor="w")
-            else:
-                self.tree.column(col, width=120, anchor="center")
+            # Width sẽ được set trong refresh_table
         
         # Tải dữ liệu ban đầu
         self.refresh_table()
+        
+        # Bind double click để ignore (tránh trigger filter)
+        self.tree.bind("<Double-1>", lambda e: None)
         
         # Frame cho các nút điều khiển
         btn_frame = ctk.CTkFrame(main_frame)
         btn_frame.pack(fill="x", padx=10, pady=(0, 10))
         
-        # Nút xuất CSV
-        csv_btn = ctk.CTkButton(btn_frame, text="📄 Xuất CSV", 
-                              command=self.export_csv,
-                              width=120)
-        csv_btn.pack(side="left", padx=(15, 10), pady=12)
-        
-        # Nút xuất Excel
-        excel_btn = ctk.CTkButton(btn_frame, text="📊 Xuất Excel", 
-                                command=self.export_excel,
-                                width=120)
-        excel_btn.pack(side="left", padx=(0, 10), pady=12)
+        # Dropdown xuất dữ liệu
+        self.export_var = tk.StringVar(value="Chọn định dạng xuất")
+        export_options = ["Chọn định dạng xuất", "CSV", "Excel", "JSON"]
+        export_menu = ctk.CTkOptionMenu(btn_frame, 
+                                      values=export_options,
+                                      variable=self.export_var,
+                                      command=self.handle_export,
+                                      width=150)
+        export_menu.pack(side="left", padx=(15, 10), pady=12)
         
         # Nút làm mới
         refresh_btn = ctk.CTkButton(btn_frame, text="🔄 Làm mới", 
@@ -303,6 +313,82 @@ class EmployeeApp:
     
     def show_column_filter(self, column):
         """Hiển thị bộ lọc cho cột được chọn"""
+        if self.filter_pending is not None:
+            return  # Debounce
+        
+        self.filter_pending = column
+        self.root.after(200, lambda: self.do_show_column_filter(column))
+    
+    def apply_text_filter(self, column, filter_text):
+        """Áp dụng filter dạng text"""
+        if not filter_text.strip():
+            if column in self.column_filters:
+                del self.column_filters[column]
+        else:
+            self.column_filters[column] = filter_text.strip().lower()
+        
+        self.apply_column_filters()
+        self.refresh_table()
+    
+    def apply_option_filter(self, column, selected_value):
+        """Áp dụng filter dạng option menu"""
+        if selected_value == "-- Tất cả --":
+            if column in self.column_filters:
+                del self.column_filters[column]
+        else:
+            self.column_filters[column] = selected_value
+        
+        self.apply_column_filters()
+        self.refresh_table()
+    
+    def apply_column_filters(self):
+        """Áp dụng tất cả các filter cột"""
+        if self.df.empty:
+            self.filtered_df = pd.DataFrame()
+            return
+            
+        temp_df = self.df.copy()
+        
+        # Áp dụng search filter trước
+        search_text = self.search_entry.get().strip() if hasattr(self, 'search_entry') else ""
+        if search_text:
+            search_columns = ['name', 'email', 'phone', 'code', 'position']
+            mask = pd.Series([False] * len(temp_df))
+            
+            for i, (_, row) in enumerate(temp_df.iterrows()):
+                for col in search_columns:
+                    if col in temp_df.columns:
+                        val = row[col]
+                        if val is not None and not (isinstance(val, float) and pd.isna(val)):
+                            similarity = fuzz.partial_ratio(search_text.lower(), str(val).lower())
+                            if similarity >= 60:
+                                mask.iloc[i] = True
+                                break
+            
+            temp_df = temp_df[mask]
+        
+        # Áp dụng column filters
+        for column, filter_value in self.column_filters.items():
+            if isinstance(filter_value, str) and len(filter_value) > 0 and column in temp_df.columns:
+                # Text filter (partial match)
+                mask = temp_df[column].astype(str).str.lower().str.contains(filter_value, na=False, regex=False)
+                temp_df = temp_df[mask]
+        
+        self.filtered_df = temp_df
+    
+    def reset_column_filter(self, column):
+        """Reset filter cho một cột"""
+        if column in self.column_filters:
+            del self.column_filters[column]
+        self.apply_column_filters()
+        self.refresh_table()
+    
+    def do_show_column_filter(self, column):
+        """Thực hiện hiển thị bộ lọc sau debounce"""
+        if self.filter_pending != column:
+            return
+        self.filter_pending = None
+        
         # Toggle filter frame visibility
         if self.filter_frame.winfo_viewable():
             self.filter_frame.pack_forget()
@@ -356,69 +442,6 @@ class EmployeeApp:
                                        width=60)
         reset_filter_btn.pack(side="right", padx=(0, 10), pady=10)
     
-    def apply_text_filter(self, column, filter_text):
-        """Áp dụng filter dạng text"""
-        if not filter_text.strip():
-            if column in self.column_filters:
-                del self.column_filters[column]
-        else:
-            self.column_filters[column] = filter_text.strip().lower()
-        
-        self.apply_column_filters()
-        self.refresh_table()
-    
-    def apply_option_filter(self, column, selected_value):
-        """Áp dụng filter dạng option menu"""
-        if selected_value == "-- Tất cả --":
-            if column in self.column_filters:
-                del self.column_filters[column]
-        else:
-            self.column_filters[column] = selected_value
-        
-        self.apply_column_filters()
-        self.refresh_table()
-    
-    def apply_column_filters(self):
-        """Áp dụng tất cả các filter cột"""
-        if self.df.empty:
-            self.filtered_df = pd.DataFrame()
-            return
-            
-        temp_df = self.df.copy()
-        
-        # Áp dụng search filter trước
-        search_text = self.search_entry.get().strip() if hasattr(self, 'search_entry') else ""
-        if search_text:
-            search_columns = ['name', 'email', 'phone', 'code', 'position']
-            mask = pd.Series([False] * len(temp_df))
-            
-            for i, (_, row) in enumerate(temp_df.iterrows()):
-                for col in search_columns:
-                    if col in temp_df.columns and pd.notna(row[col]):
-                        from thefuzz import fuzz
-                        similarity = fuzz.partial_ratio(search_text.lower(), str(row[col]).lower())
-                        if similarity >= 60:
-                            mask.iloc[i] = True
-                            break
-            
-            temp_df = temp_df[mask]
-        
-        # Áp dụng column filters
-        for column, filter_value in self.column_filters.items():
-            if isinstance(filter_value, str) and len(filter_value) > 0 and column in temp_df.columns:
-                # Text filter (partial match)
-                mask = temp_df[column].astype(str).str.lower().str.contains(filter_value, na=False, regex=False)
-                temp_df = temp_df[mask]
-        
-        self.filtered_df = temp_df
-    
-    def reset_column_filter(self, column):
-        """Reset filter cho một cột"""
-        if column in self.column_filters:
-            del self.column_filters[column]
-        self.apply_column_filters()
-        self.refresh_table()
-    
     def close_filter(self):
         """Đóng panel filter"""
         self.filter_frame.pack_forget()
@@ -437,7 +460,11 @@ class EmployeeApp:
             values = [str(idx)]  # STT
             for col in self.show_cols[1:]:  # Bỏ qua cột STT
                 if col in self.filtered_df.columns:
-                    values.append(str(row[col]) if pd.notna(row[col]) else "")
+                    val = row[col]
+                    if val is None or (isinstance(val, float) and pd.isna(val)):
+                        values.append("")
+                    else:
+                        values.append(str(val))
                 else:
                     values.append("")
             self.tree.insert("", "end", values=values)
@@ -451,6 +478,49 @@ class EmployeeApp:
         if hasattr(self, 'stats_label'):
             filtered = len(self.filtered_df)
             self.stats_label.configure(text=f"Hiển thị: {filtered} nhân viên")
+        
+        # Auto-resize columns based on content
+        self.auto_resize_columns()
+    
+    def auto_resize_columns(self):
+        """Tự động điều chỉnh chiều rộng cột dựa trên nội dung"""
+        if not hasattr(self, 'tree') or self.tree is None or self.filtered_df.empty:
+            return
+        
+        # Font metrics để tính width (approx 8 pixels per char)
+        char_width = 8
+        min_width = 60
+        max_width = 400
+        
+        for col in self.show_cols:
+            if col not in self.filtered_df.columns:
+                continue
+            
+            # Tính max length của header và data
+            header_text = self.headers.get(col, col)
+            header_len = len(header_text)
+            
+            # Tính max length trong data (giới hạn 1000 rows để performance)
+            sample_data = self.filtered_df[col].head(1000)
+            max_data_len = max((len(str(val)) for val in sample_data), default=0)
+            
+            # Chiều rộng = max(header, data) * char_width + padding
+            content_width = max(header_len, max_data_len) * char_width + 20
+            
+            # Giới hạn min/max
+            final_width = max(min_width, min(content_width, max_width))
+            
+            # Set anchor dựa trên kiểu dữ liệu
+            if col == 'stt':
+                anchor = "center"
+            elif col in ['id', 'code']:
+                anchor = "center"
+            elif col in ['name', 'email', 'position']:
+                anchor = "w"
+            else:
+                anchor = "center"
+            
+            self.tree.column(col, width=final_width, anchor=anchor)
     
     def refresh_all(self):
         """Làm mới toàn bộ dữ liệu"""
@@ -468,7 +538,8 @@ class EmployeeApp:
             self.filter_frame.pack_forget()
     
     def export_csv(self):
-        if self.df is None:
+        if self.filtered_df.empty:
+            messagebox.showwarning("Cảnh báo", "Không có dữ liệu để xuất!")
             return
         
         filename = filedialog.asksaveasfilename(
@@ -479,13 +550,14 @@ class EmployeeApp:
         
         if filename:
             try:
-                self.df.to_csv(filename, index=False, encoding='utf-8-sig')
-                messagebox.showinfo("Thành công", f"Đã xuất file CSV: {filename}")
+                self.filtered_df.to_csv(filename, index=False, encoding='utf-8-sig')
+                messagebox.showinfo("Thành công", f"Đã xuất {len(self.filtered_df)} nhân viên ra file CSV: {filename}")
             except Exception as e:
                 messagebox.showerror("Lỗi", f"Không thể xuất file CSV: {str(e)}")
     
     def export_excel(self):
-        if self.df is None:
+        if self.filtered_df.empty:
+            messagebox.showwarning("Cảnh báo", "Không có dữ liệu để xuất!")
             return
         
         filename = filedialog.asksaveasfilename(
@@ -496,10 +568,46 @@ class EmployeeApp:
         
         if filename:
             try:
-                self.df.to_excel(filename, index=False)
-                messagebox.showinfo("Thành công", f"Đã xuất file Excel: {filename}")
+                self.filtered_df.to_excel(filename, index=False)
+                messagebox.showinfo("Thành công", f"Đã xuất {len(self.filtered_df)} nhân viên ra file Excel: {filename}")
             except Exception as e:
                 messagebox.showerror("Lỗi", f"Không thể xuất file Excel: {str(e)}")
+    
+    def export_json(self):
+        if self.filtered_df.empty:
+            messagebox.showwarning("Cảnh báo", "Không có dữ liệu để xuất!")
+            return
+        
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="Lưu file JSON"
+        )
+        
+        if filename:
+            try:
+                self.filtered_df.to_json(filename, orient='records', indent=4, force_ascii=False)
+                messagebox.showinfo("Thành công", f"Đã xuất {len(self.filtered_df)} nhân viên ra file JSON: {filename}")
+            except Exception as e:
+                messagebox.showerror("Lỗi", f"Không thể xuất file JSON: {str(e)}")
+    
+    def handle_export(self, selected_format):
+        """Xử lý lựa chọn xuất dữ liệu từ dropdown"""
+        if self.is_exporting or selected_format == "Chọn định dạng xuất":
+            return
+        
+        self.is_exporting = True
+        try:
+            if selected_format == "CSV":
+                self.export_csv()
+            elif selected_format == "Excel":
+                self.export_excel()
+            elif selected_format == "JSON":
+                self.export_json()
+        finally:
+            self.is_exporting = False
+            if self.export_var:
+                self.export_var.set("Chọn định dạng xuất")
     
     def run(self):
         self.root.mainloop()
@@ -776,23 +884,15 @@ class EmployeeApp:
         if choice == '4':
             return
         
-        # Column selection
-        display_cols = ['stt', 'name', 'email', 'phone', 'code', 'position']
+        # Column selection - tạo động từ data
+        all_cols = {}
+        for i, col in enumerate(['stt'] + list(self.df.columns), 1):
+            all_cols[str(i)] = col
+        
+        display_cols = ['stt'] + list(self.df.columns)[:5]  # Mặc định hiển thị STT + 5 cột đầu
         
         if choice == '3':
             print("\nAvailable columns:")
-            all_cols = {
-                '1': 'stt',
-                '2': 'name', 
-                '3': 'email',
-                '4': 'phone',
-                '5': 'code',
-                '6': 'position',
-                '7': 'dob',
-                '8': 'bank_account',
-                '9': 'bank_name'
-            }
-            
             for key, col in all_cols.items():
                 print(f"{key}. {col}")
             
@@ -802,7 +902,7 @@ class EmployeeApp:
                 selected_indices = [int(x.strip()) for x in col_choice.split(',')]
                 display_cols = [all_cols[str(i)] for i in selected_indices if str(i) in all_cols]
                 if not display_cols:
-                    display_cols = ['stt', 'name', 'email', 'phone', 'code', 'position']
+                    display_cols = ['stt'] + list(self.df.columns)[:5]
             except:
                 print("Invalid selection, using default columns")
         
@@ -916,21 +1016,22 @@ class EmployeeApp:
         print("Export options:")
         print("1. Export to CSV")
         print("2. Export to Excel")
-        print("3. Export with custom filename")
-        print("4. Back to main menu")
+        print("3. Export to JSON")
+        print("4. Export with custom filename")
+        print("5. Back to main menu")
         
-        choice = input("Choose export option (1-4): ").strip()
+        choice = input("Choose export option (1-5): ").strip()
         
-        if choice == '4':
+        if choice == '5':
             return
         
         base_name = "employees"
-        if choice == '3':
+        if choice == '4':
             base_name = input("Enter base filename (without extension): ").strip()
             if not base_name:
                 base_name = "employees"
         
-        if choice in ['1', '3']:
+        if choice in ['1', '4']:
             filename = f"{base_name}.csv"
             try:
                 self.filtered_df.to_csv(filename, index=False, encoding='utf-8-sig')
@@ -942,6 +1043,14 @@ class EmployeeApp:
             filename = f"{base_name}.xlsx"
             try:
                 self.filtered_df.to_excel(filename, index=False)
+                print(f"✅ Exported {len(self.filtered_df)} employees to {filename}")
+            except Exception as e:
+                print(f"❌ Export failed: {str(e)}")
+        
+        elif choice == '3':
+            filename = f"{base_name}.json"
+            try:
+                self.filtered_df.to_json(filename, orient='records', indent=4, force_ascii=False)
                 print(f"✅ Exported {len(self.filtered_df)} employees to {filename}")
             except Exception as e:
                 print(f"❌ Export failed: {str(e)}")
@@ -969,11 +1078,13 @@ class EmployeeApp:
             
             for i, (_, row) in enumerate(temp_df.iterrows()):
                 for col in search_columns:
-                    if col in temp_df.columns and pd.notna(row[col]):
-                        similarity = fuzz.partial_ratio(search_text.lower(), str(row[col]).lower())
-                        if similarity >= 60:
-                            mask.iloc[i] = True
-                            break
+                    if col in temp_df.columns:
+                        val = row[col]
+                        if val is not None and not (isinstance(val, float) and pd.isna(val)):
+                            similarity = fuzz.partial_ratio(search_text.lower(), str(val).lower())
+                            if similarity >= 60:
+                                mask.iloc[i] = True
+                                break
             
             temp_df = temp_df[mask]
         
