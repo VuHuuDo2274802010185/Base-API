@@ -20,8 +20,8 @@ class EmployeeApp:
         self.filter_pending = None
         
         # Load environment variables from HRM/.env
-        env_path = os.path.join(os.path.dirname(__file__), '.env')
-        load_dotenv(env_path)
+        self.env_path = os.path.join(os.path.dirname(__file__), '.env')
+        load_dotenv(self.env_path)
         
         self.setup_gui()
     
@@ -70,12 +70,36 @@ class EmployeeApp:
                                        font=ctk.CTkFont(size=12))
         self.status_label.pack(pady=(0, 10))
         
+    def save_api_key(self, api_key: str):
+        """Tạo hoặc cập nhật .env với API_KEY (chỉ khi thiếu hoặc khác)"""
+        try:
+            current = os.getenv('API_KEY')
+            # Nếu chưa có file hoặc chưa có key hoặc key khác -> ghi
+            if (not os.path.exists(self.env_path)) or (not current) or (current != api_key):
+                lines = []
+                if os.path.exists(self.env_path):
+                    with open(self.env_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                    # Loại dòng API_KEY cũ
+                    lines = [l for l in lines if not l.strip().startswith('API_KEY=')]
+                lines.append(f"API_KEY={api_key}\n")
+                with open(self.env_path, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+        except Exception as e:
+            if hasattr(self, 'root'):
+                messagebox.showwarning("Cảnh báo", f"Không thể ghi .env: {e}")
+            else:
+                print(f"Warning: cannot write .env file: {e}")
+    
     def fetch_employees(self):
         api_key = self.api_entry.get().strip()
         
         if not api_key:
             messagebox.showerror("Lỗi", "Vui lòng nhập API key!")
             return
+        
+        # Lưu/ cập nhật .env ngay khi người dùng nhập (lần đầu hoặc đổi)
+        self.save_api_key(api_key)
         
         self.status_label.configure(text="Đang lấy dữ liệu...")
         self.fetch_btn.configure(state="disabled")
@@ -613,39 +637,29 @@ class EmployeeApp:
         self.root.mainloop()
     
     def console_run(self):
-        """Run the application in console mode with full GUI functionality"""
         print("HRM Employee Manager - Console Mode")
         print("=" * 50)
-        
-        # Load environment variables from HRM/.env
-        env_path = os.path.join(os.path.dirname(__file__), '.env')
-        load_dotenv(env_path)
-        
-        # Get API key from user or environment
-        api_key = input("Enter your API key (press Enter to use from .env): ").strip()
-        
-        if not api_key:
+        if not hasattr(self, 'env_path'):
+            self.env_path = os.path.join(os.path.dirname(__file__), '.env')
+            load_dotenv(self.env_path)
+        api_key_input = input("Enter your API key (press Enter to use from .env): ").strip()
+        if api_key_input:
+            # Người dùng cung cấp key mới
+            self.save_api_key(api_key_input)
+            print("Saved API key to .env for future runs.")
+            api_key = api_key_input
+        else:
             api_key = os.getenv('API_KEY')
             if api_key:
                 print("Using API key from .env file")
             else:
                 print("Error: API key is required!")
                 sys.exit(1)
-        
         print("Fetching employee data...")
-        
         try:
             # URL API
             url = "https://hrm.base.vn/extapi/v1/employee/list"
-            
-            # Payload
-            payload = {
-                "access_token": api_key,
-                "page": 1,
-                "limit": 50
-            }
-            
-            # Send POST request
+            payload = {"access_token": api_key, "page": 1, "limit": 50}
             response = requests.post(url, data=payload)
             
             if response.status_code == 200:
@@ -951,131 +965,130 @@ class EmployeeApp:
                 print("q. Quit display")
                 
                 nav_choice = input("Choose (n/p/g/q): ").strip().lower()
-                
-                if nav_choice == 'q':
-                    break
-                elif nav_choice == 'n' and current_page < total_pages:
-                    current_page += 1
-                elif nav_choice == 'p' and current_page > 1:
-                    current_page -= 1
-                elif nav_choice == 'g':
-                    try:
-                        page_num = int(input("Enter page number: ").strip())
-                        if 1 <= page_num <= total_pages:
-                            current_page = page_num
-                        else:
-                            print("Invalid page number")
-                    except:
-                        print("Invalid input")
+                while True:
+                    if nav_choice == 'q':
+                        break
+                    elif nav_choice == 'n' and current_page < total_pages:
+                        current_page += 1
+                    elif nav_choice == 'p' and current_page > 1:
+                        current_page -= 1
+                    elif nav_choice == 'g':
+                        try:
+                            page_num = int(input("Enter page number: ").strip())
+                            if 1 <= page_num <= total_pages:
+                                current_page = page_num
+                            else:
+                                print("Invalid page number")
+                        except:
+                            print("Invalid input")
+                    else:
+                        print("Invalid choice")
+                    if nav_choice == 'q':
+                        break
+                    start_idx = (current_page - 1) * page_size
+                    end_idx = min(start_idx + page_size, len(self.filtered_df))
+                    print(f"\nPage {current_page}/{total_pages} (showing {start_idx+1}-{end_idx} of {len(self.filtered_df)})")
+                    page_df = self.filtered_df[display_cols].iloc[start_idx:end_idx].copy()
+                    for col in display_cols:
+                        if col in ['name', 'email', 'position']:
+                            page_df[col] = page_df[col].astype(str).str.slice(0, 30)
+                    print(page_df.to_string(index=False, max_colwidth=30))
+                    if total_pages == 1:
+                        break
+                    print("\nNavigation:")
+                    print("n. Next page")
+                    print("p. Previous page")
+                    print("g. Go to page")
+                    print("q. Quit display")
+                    nav_choice = input("Choose (n/p/g/q): ").strip().lower()
     
     def console_statistics(self):
         """Console statistics functionality"""
         print("\n📈 STATISTICS")
         print("-" * 30)
-        
         if self.filtered_df.empty:
             print("No data to analyze")
             return
-        
         print(f"Total employees: {len(self.filtered_df)}")
         print(f"Original dataset: {len(self.df)}")
-        
-        # Gender distribution (assuming gender can be inferred from name or other fields)
-        # Since we don't have explicit gender field, let's count by position
         if 'position' in self.filtered_df.columns:
             position_counts = self.filtered_df['position'].value_counts()
             print(f"\n📊 Employees by position:")
             for pos, count in position_counts.head(10).items():
                 print(f"  {pos}: {count}")
-        
-        # Email domains
         if 'email' in self.filtered_df.columns:
-            email_domains = self.filtered_df['email'].dropna().apply(lambda x: str(x).split('@')[-1] if '@' in str(x) else 'unknown')
+            email_domains = self.filtered_df['email'].dropna().apply(
+                lambda x: str(x).split('@')[-1] if '@' in str(x) else 'unknown'
+            )
             domain_counts = email_domains.value_counts()
             print(f"\n📧 Email domains:")
             for domain, count in domain_counts.head(5).items():
                 print(f"  {domain}: {count}")
-        
-        # Bank distribution
         if 'bank_name' in self.filtered_df.columns:
             bank_counts = self.filtered_df['bank_name'].value_counts()
             print(f"\n🏦 Bank distribution:")
             for bank, count in bank_counts.head(5).items():
                 if bank and bank != 'nan':
                     print(f"  {bank}: {count}")
-    
+
     def console_export(self):
         """Console export functionality"""
         print("\n📄 EXPORT DATA")
         print("-" * 30)
-        
         if self.filtered_df.empty:
             print("No data to export")
             return
-        
         print("Export options:")
         print("1. Export to CSV")
         print("2. Export to Excel")
         print("3. Export to JSON")
         print("4. Export with custom filename")
         print("5. Back to main menu")
-        
         choice = input("Choose export option (1-5): ").strip()
-        
         if choice == '5':
             return
-        
         base_name = "employees"
         if choice == '4':
-            base_name = input("Enter base filename (without extension): ").strip()
-            if not base_name:
-                base_name = "employees"
-        
+            base_name = input("Enter base filename (without extension): ").strip() or "employees"
         if choice in ['1', '4']:
             filename = f"{base_name}.csv"
             try:
                 self.filtered_df.to_csv(filename, index=False, encoding='utf-8-sig')
                 print(f"✅ Exported {len(self.filtered_df)} employees to {filename}")
             except Exception as e:
-                print(f"❌ Export failed: {str(e)}")
-        
+                print(f"❌ Export failed: {e}")
         elif choice == '2':
             filename = f"{base_name}.xlsx"
             try:
                 self.filtered_df.to_excel(filename, index=False)
                 print(f"✅ Exported {len(self.filtered_df)} employees to {filename}")
             except Exception as e:
-                print(f"❌ Export failed: {str(e)}")
-        
+                print(f"❌ Export failed: {e}")
         elif choice == '3':
             filename = f"{base_name}.json"
             try:
                 self.filtered_df.to_json(filename, orient='records', indent=4, force_ascii=False)
                 print(f"✅ Exported {len(self.filtered_df)} employees to {filename}")
             except Exception as e:
-                print(f"❌ Export failed: {str(e)}")
-    
+                print(f"❌ Export failed: {e}")
+
     def console_reset(self):
         """Reset all filters and search"""
         self.search_text = ""
         self.column_filters = {}
         self.filtered_df = self.df.copy()
         print("✅ All filters and search cleared")
-    
+
     def apply_console_filters(self):
         """Apply search and column filters to filtered_df"""
         if self.df.empty:
             self.filtered_df = pd.DataFrame()
             return
-        
         temp_df = self.df.copy()
-        
-        # Apply search filter
         search_text = getattr(self, 'search_text', '')
         if search_text:
             search_columns = ['name', 'email', 'phone', 'code', 'position']
             mask = pd.Series([False] * len(temp_df))
-            
             for i, (_, row) in enumerate(temp_df.iterrows()):
                 for col in search_columns:
                     if col in temp_df.columns:
@@ -1085,15 +1098,11 @@ class EmployeeApp:
                             if similarity >= 60:
                                 mask.iloc[i] = True
                                 break
-            
             temp_df = temp_df[mask]
-        
-        # Apply column filters
         for column, filter_value in self.column_filters.items():
             if filter_value and column in temp_df.columns:
                 mask = temp_df[column].astype(str).str.lower().str.contains(filter_value, na=False, regex=False)
                 temp_df = temp_df[mask]
-        
         self.filtered_df = temp_df
 
 # Chạy ứng dụng
