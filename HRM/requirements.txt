@@ -1,7 +1,5 @@
-pip-requirements
 requests
 pandas
 customtkinter
 thefuzz
-python-dotenv
 python-dotenv

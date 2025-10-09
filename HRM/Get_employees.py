@@ -6,24 +6,21 @@ from tkinter import ttk, messagebox, filedialog
 from thefuzz import fuzz
 import re
 import os
-from dotenv import load_dotenv
-import os
 import sys
+from dotenv import load_dotenv
 
 class EmployeeApp:
     def __init__(self):
-        load_dotenv()
         self.df = pd.DataFrame()
         self.filtered_df = pd.DataFrame()
         self.tree = None
         self.column_filters = {}
         
-        # Check if display is available
-        if os.environ.get('DISPLAY') is None:
-            print("No display available. Running in console mode.")
-            self.console_run()
-        else:
-            self.setup_gui()
+        # Load environment variables from HRM/.env
+        env_path = os.path.join(os.path.dirname(__file__), '.env')
+        load_dotenv(env_path)
+        
+        self.setup_gui()
     
     def setup_gui(self):
         # Cấu hình CustomTkinter
@@ -52,8 +49,12 @@ class EmployeeApp:
         
         self.api_entry = ctk.CTkEntry(main_frame, placeholder_text="Nhập API key của bạn...", 
                                     width=300, show="*")
-        self.api_entry.insert(0, os.getenv('API_KEY', ''))
         self.api_entry.pack(pady=(0, 20))
+        
+        # Load API key from environment if available
+        api_key = os.getenv('API_KEY')
+        if api_key:
+            self.api_entry.insert(0, api_key)
         
         # Nút lấy dữ liệu
         self.fetch_btn = ctk.CTkButton(main_frame, text="Lấy danh sách nhân viên", 
@@ -99,8 +100,6 @@ class EmployeeApp:
                     if employees:
                         # Xử lý dữ liệu
                         self.df = pd.DataFrame(employees)
-                        
-                        # Thêm các cột đã xử lý
                         self.df['email'] = self.df.apply(lambda x: x.get('email'), axis=1)
                         self.df['phone'] = self.df.apply(lambda x: x.get('phone'), axis=1)
                         self.df['dob'] = self.df.apply(lambda x: f"{x.get('dob_day')}/{x.get('dob_month')}/{x.get('dob_year')}", axis=1)
@@ -191,7 +190,7 @@ class EmployeeApp:
         h_scrollbar = ttk.Scrollbar(table_frame, orient="horizontal")
         
         # Treeview với cột STT đầu tiên
-        self.show_cols = ['stt', 'id', 'metatype', 'code', 'first_name', 'last_name', 'title', 'profile', 'is_primary', 'review', 'user_id', 'email', 'gender', 'phone', 'dob_day', 'dob_month', 'dob_year', 'tax_id', 'insurance_id', 'bank', 'basic_salary', 'salary', 'team_id', 'timesheet_id', 'office_id', 'employee_type_id', 'area_id', 'position_id', 'payroll_policy_id', 'is_terminated', 'terminated_date', 'start_date', 'official_start_date', 'form', 'last_update', 'name', 'type', 'status', 'dob', 'position', 'bank_account', 'bank_name']
+        self.show_cols = ['stt', 'id','code','name','email','phone','dob','position','bank_account','bank_name']
         self.tree = ttk.Treeview(table_frame, 
                                columns=self.show_cols, 
                                show="headings",
@@ -209,42 +208,10 @@ class EmployeeApp:
         self.headers = {
             'stt': 'STT',
             'id': 'ID',
-            'metatype': 'Metatype',
             'code': 'Mã NV',
-            'first_name': 'Tên',
-            'last_name': 'Họ',
-            'title': 'Chức danh',
-            'profile': 'Hồ sơ',
-            'is_primary': 'Chính',
-            'review': 'Đánh giá',
-            'user_id': 'ID Người dùng',
-            'email': 'Email',
-            'gender': 'Giới tính',
-            'phone': 'Số điện thoại',
-            'dob_day': 'Ngày sinh (ngày)',
-            'dob_month': 'Ngày sinh (tháng)',
-            'dob_year': 'Ngày sinh (năm)',
-            'tax_id': 'Mã thuế',
-            'insurance_id': 'Mã bảo hiểm',
-            'bank': 'Ngân hàng',
-            'basic_salary': 'Lương cơ bản',
-            'salary': 'Lương',
-            'team_id': 'ID Nhóm',
-            'timesheet_id': 'ID Thời gian biểu',
-            'office_id': 'ID Văn phòng',
-            'employee_type_id': 'ID Loại nhân viên',
-            'area_id': 'ID Khu vực',
-            'position_id': 'ID Chức vụ',
-            'payroll_policy_id': 'ID Chính sách lương',
-            'is_terminated': 'Đã nghỉ việc',
-            'terminated_date': 'Ngày nghỉ',
-            'start_date': 'Ngày bắt đầu',
-            'official_start_date': 'Ngày chính thức',
-            'form': 'Biểu mẫu',
-            'last_update': 'Cập nhật cuối',
             'name': 'Họ tên',
-            'type': 'Loại',
-            'status': 'Trạng thái',
+            'email': 'Email', 
+            'phone': 'Số điện thoại',
             'dob': 'Ngày sinh',
             'position': 'Chức vụ',
             'bank_account': 'Số TK',
@@ -257,8 +224,12 @@ class EmployeeApp:
                             command=lambda c=col: self.show_column_filter(c))
             if col == 'stt':
                 self.tree.column(col, width=60, anchor="center")
+            elif col in ['id', 'code']:
+                self.tree.column(col, width=80, anchor="center")
+            elif col in ['name', 'email']:
+                self.tree.column(col, width=150, anchor="w")
             else:
-                self.tree.column(col, width=100, anchor="w")
+                self.tree.column(col, width=120, anchor="center")
         
         # Tải dữ liệu ban đầu
         self.refresh_table()
@@ -308,7 +279,7 @@ class EmployeeApp:
             
             for i, (idx, row) in enumerate(self.df.iterrows()):
                 for col in search_columns:
-                    if col in self.df.columns and row[col] is not None and str(row[col]).lower() not in ['nan', 'none']:
+                    if col in self.df.columns and pd.notna(row[col]):
                         # Sử dụng thefuzz để tìm kiếm fuzzy
                         from thefuzz import fuzz
                         similarity = fuzz.partial_ratio(search_text.lower(), str(row[col]).lower())
@@ -423,7 +394,7 @@ class EmployeeApp:
             
             for i, (_, row) in enumerate(temp_df.iterrows()):
                 for col in search_columns:
-                    if col in temp_df.columns and row[col] is not None and str(row[col]).lower() not in ['nan', 'none']:
+                    if col in temp_df.columns and pd.notna(row[col]):
                         from thefuzz import fuzz
                         similarity = fuzz.partial_ratio(search_text.lower(), str(row[col]).lower())
                         if similarity >= 60:
@@ -466,11 +437,7 @@ class EmployeeApp:
             values = [str(idx)]  # STT
             for col in self.show_cols[1:]:  # Bỏ qua cột STT
                 if col in self.filtered_df.columns:
-                    val = row[col]
-                    if val is not None and str(val).lower() not in ['nan', 'none']:
-                        values.append(str(val))
-                    else:
-                        values.append("")
+                    values.append(str(row[col]) if pd.notna(row[col]) else "")
                 else:
                     values.append("")
             self.tree.insert("", "end", values=values)
@@ -542,12 +509,20 @@ class EmployeeApp:
         print("HRM Employee Manager - Console Mode")
         print("=" * 50)
         
-        # Get API key from user
-        api_key = input("Enter your API key: ").strip()
+        # Load environment variables from HRM/.env
+        env_path = os.path.join(os.path.dirname(__file__), '.env')
+        load_dotenv(env_path)
+        
+        # Get API key from user or environment
+        api_key = input("Enter your API key (press Enter to use from .env): ").strip()
         
         if not api_key:
-            print("Error: API key is required!")
-            sys.exit(1)
+            api_key = os.getenv('API_KEY')
+            if api_key:
+                print("Using API key from .env file")
+            else:
+                print("Error: API key is required!")
+                sys.exit(1)
         
         print("Fetching employee data...")
         
