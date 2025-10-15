@@ -4,12 +4,15 @@ Quản lý dữ liệu cho ứng dụng HRM Employee Manager
 Bao gồm các chức năng gọi API, xử lý dữ liệu và xuất dữ liệu.
 """
 
+import logging
+from typing import Optional, Tuple
+
 import requests
 import pandas as pd
 import os
 from dotenv import load_dotenv
 from config import API_URL, API_PAGE, API_LIMIT
-from utils import process_employee_data
+from utils import process_employee_data, fuzzy_search_dataframe, apply_column_filters
 
 
 class DataManager:
@@ -26,36 +29,60 @@ class DataManager:
         load_dotenv(env_path)
 
     def fetch_employees(self, api_key):
-        """Lấy dữ liệu nhân viên từ API"""
+        """Fetch employee list from API.
+
+        Returns (count, error_message). On success error_message is None.
+        """
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "HRM-Client/1.0",
+        }
+
+        payload = {"access_token": api_key, "page": API_PAGE, "limit": API_LIMIT}
+
         try:
-            payload = {
-                "access_token": api_key,
-                "page": API_PAGE,
-                "limit": API_LIMIT
-            }
+            resp = requests.post(API_URL, data=payload, headers=headers, timeout=20)
+        except requests.exceptions.RequestException as exc:
+            logging.exception("Network error while fetching employees")
+            return 0, f"Không thể kết nối đến API: {exc}"
 
-            response = requests.post(API_URL, data=payload)
+        # Check HTTP status
+        if resp.status_code != 200:
+            logging.warning("API returned status %s: %s", resp.status_code, resp.text[:400])
+            return 0, f"API trả về lỗi: {resp.status_code}"
 
-            if response.status_code == 200:
-                data = response.json()
+        # Try parse JSON, but be defensive
+        content_type = resp.headers.get("Content-Type", "")
+        if "application/json" not in content_type.lower():
+            logging.warning("Unexpected content-type: %s", content_type)
+            # attempt to parse anyway
+            try:
+                data = resp.json()
+            except Exception:
+                return 0, "API không trả về JSON; kiểm tra token/endpoint"
+        else:
+            try:
+                data = resp.json()
+            except Exception as exc:
+                logging.exception("Failed to parse JSON response")
+                return 0, f"Không thể phân tích JSON trả về: {exc}"
 
-                if data and 'employees' in data:
-                    employees = data['employees']
-                    if employees:
-                        self.df = process_employee_data(employees)
-                        self.filtered_df = self.df.copy()
-                        return len(self.df), None
-                    else:
-                        return 0, "Danh sách nhân viên trống!"
-                else:
-                    return 0, "Không tìm thấy dữ liệu nhân viên!"
-            else:
-                return 0, f"API trả về lỗi: {response.status_code}"
+        # Validate shape
+        if not data or 'employees' not in data:
+            logging.debug("Response JSON missing 'employees' key: %s", data)
+            return 0, "Không tìm thấy dữ liệu nhân viên!"
 
-        except requests.exceptions.RequestException as e:
-            return 0, f"Không thể kết nối đến API: {str(e)}"
-        except Exception as e:
-            return 0, f"Đã xảy ra lỗi: {str(e)}"
+        employees = data.get('employees') or []
+        if not employees:
+            return 0, "Danh sách nhân viên trống!"
+
+        try:
+            self.df = process_employee_data(employees)
+            self.filtered_df = self.df.copy()
+            return len(self.df), None
+        except Exception as exc:
+            logging.exception("Error processing employee data")
+            return 0, f"Lỗi khi xử lý dữ liệu nhân viên: {exc}"
 
     def apply_filters(self):
         """Áp dụng tất cả bộ lọc"""
